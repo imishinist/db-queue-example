@@ -15,6 +15,8 @@ type enqueueOpt struct {
 	BatchSize     int
 	BatchInterval time.Duration
 
+	RecordDelay time.Duration
+
 	DSN string
 }
 
@@ -23,10 +25,12 @@ func enqueueCmd() command {
 	opt := &enqueueOpt{
 		BatchSize:     10,
 		BatchInterval: 1 * time.Second,
+		RecordDelay:   1 * time.Second,
 		DSN:           "postgres://postgres:password@localhost:5432?sslmode=disable",
 	}
 	fs.IntVar(&opt.BatchSize, "batch-size", opt.BatchSize, "batch size")
 	fs.DurationVar(&opt.BatchInterval, "batch-interval", opt.BatchInterval, "batch interval")
+	fs.DurationVar(&opt.RecordDelay, "record-delay", opt.RecordDelay, "record delay")
 	fs.StringVar(&opt.DSN, "dsn", opt.DSN, "database source name")
 
 	return command{
@@ -41,14 +45,17 @@ func enqueueCmd() command {
 			}
 
 			ctx := context.Background()
-			broker := NewBroker(conn, opt.BatchInterval)
+			broker := NewBroker(conn, opt.RecordDelay)
 
 			lines, err := readLineAsJson()
 			if err != nil {
 				return err
 			}
 			chunks := chunkBy(lines, opt.BatchSize)
-			for _, chunk := range chunks {
+			for i, chunk := range chunks {
+				if i > 0 {
+					time.Sleep(opt.BatchInterval)
+				}
 				if err := broker.Produce(ctx, chunk); err != nil {
 					return err
 				}
@@ -103,7 +110,8 @@ func dequeueCmd() command {
 					json.NewEncoder(os.Stdout).Encode(record)
 				}
 				if len(records) > 0 {
-					log.Printf("current vt: %s", broker.GetCursor())
+					last := broker.GetCursor()
+					log.Printf("current vt: %s", last.Format(time.RFC3339Nano))
 				}
 				time.Sleep(opt.PollInterval)
 			}
