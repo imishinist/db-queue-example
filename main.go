@@ -1,19 +1,33 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"sort"
+	"time"
 )
 
 type enqueueOpt struct {
+	BatchSize     int
+	BatchInterval time.Duration
+
+	DSN string
 }
 
 func enqueueCmd() command {
 	fs := flag.NewFlagSet("enqueue", flag.ExitOnError)
-	opt := &enqueueOpt{}
+	opt := &enqueueOpt{
+		BatchSize:     10,
+		BatchInterval: 1 * time.Second,
+		DSN:           "postgres://postgres:password@localhost:5432?sslmode=disable",
+	}
+	fs.IntVar(&opt.BatchSize, "batch-size", opt.BatchSize, "batch size")
+	fs.DurationVar(&opt.BatchInterval, "batch-interval", opt.BatchInterval, "batch interval")
+	fs.StringVar(&opt.DSN, "dsn", opt.DSN, "database source name")
 
 	return command{
 		fs: fs,
@@ -21,18 +35,49 @@ func enqueueCmd() command {
 			if err := fs.Parse(args); err != nil {
 				return err
 			}
-			fmt.Println("enqueue", opt)
+			conn, err := DBConnect(opt.DSN)
+			if err != nil {
+				return err
+			}
+
+			ctx := context.Background()
+			broker := NewBroker(conn, opt.BatchInterval)
+
+			lines, err := readLineAsJson()
+			if err != nil {
+				return err
+			}
+			chunks := chunkBy(lines, opt.BatchSize)
+			for _, chunk := range chunks {
+				if err := broker.Produce(ctx, chunk); err != nil {
+					return err
+				}
+			}
 			return nil
 		},
 	}
 }
 
 type dequeueOpt struct {
+	BatchSize    int
+	PollInterval time.Duration
+
+	LastVT time.Time
+
+	DSN string
 }
 
 func dequeueCmd() command {
 	fs := flag.NewFlagSet("dequeue", flag.ExitOnError)
-	opt := &dequeueOpt{}
+	opt := &dequeueOpt{
+		BatchSize:    10,
+		PollInterval: 5 * time.Second,
+		DSN:          "postgres://postgres:password@localhost:5432?sslmode=disable",
+	}
+	fs.IntVar(&opt.BatchSize, "batch-size", opt.BatchSize, "batch size")
+	fs.DurationVar(&opt.PollInterval, "poll-interval", opt.PollInterval, "poll interval")
+	fs.Var(&TimeValue{Time: &opt.LastVT}, "last-vt", "last vt")
+	fs.StringVar(&opt.DSN, "dsn", opt.DSN, "database source name")
 
 	return command{
 		fs: fs,
@@ -40,8 +85,28 @@ func dequeueCmd() command {
 			if err := fs.Parse(args); err != nil {
 				return err
 			}
-			fmt.Println("dequeue", opt)
-			return nil
+			conn, err := DBConnect(opt.DSN)
+			if err != nil {
+				return err
+			}
+
+			ctx := context.Background()
+			broker := NewBroker(conn, time.Duration(0))
+			broker.SetCursor(opt.LastVT)
+
+			for {
+				records, err := broker.Consume(ctx, opt.BatchSize)
+				if err != nil {
+					return err
+				}
+				for _, record := range records {
+					json.NewEncoder(os.Stdout).Encode(record)
+				}
+				if len(records) > 0 {
+					log.Printf("current vt: %s", broker.GetCursor())
+				}
+				time.Sleep(opt.PollInterval)
+			}
 		},
 	}
 }
