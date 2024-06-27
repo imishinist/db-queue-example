@@ -20,7 +20,9 @@ echo '{"user_id": 1}' | ./db-queue-example enqueue
 
 ### Dequeue
 
+It consumes from read-replica.
+
 ```bash
-./db-queue-example dequeue -poll-interval 1s
+./db-queue-example dequeue -dsn 'postgres://postgres:password@localhost:5433?sslmode=disable' -poll-interval 1s
 ```
 
