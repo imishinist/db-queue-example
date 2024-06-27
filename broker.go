@@ -39,10 +39,10 @@ func (b *Broker) GetCursor() time.Time {
 	return b.cursor
 }
 
-func (b *Broker) Produce(ctx context.Context, messages []json.RawMessage) (err error) {
+func (b *Broker) Produce(ctx context.Context, messages []json.RawMessage) (records []Record, err error) {
 	tx, err := b.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return
 	}
 	defer func() {
 		if err != nil {
@@ -57,21 +57,23 @@ func (b *Broker) Produce(ctx context.Context, messages []json.RawMessage) (err e
 		msgs[i] = string(msg)
 	}
 
-	query := fmt.Sprintf("INSERT INTO queue (vt, message) SELECT clock_timestamp() + interval '%d seconds', unnest($1::jsonb[]) RETURNING msg_id", int(b.delay.Seconds()))
+	query := fmt.Sprintf("INSERT INTO queue (vt, message) SELECT clock_timestamp() + interval '%d seconds', unnest($1::jsonb[]) RETURNING *", int(b.delay.Seconds()))
 	rows, err := tx.QueryContext(ctx, query, pq.Array(msgs))
 	if err != nil {
-		return err
+		return
 	}
 	defer rows.Close()
 
+	records = make([]Record, 0, len(messages))
 	for rows.Next() {
-		var msgID int
-		if err := rows.Scan(&msgID); err != nil {
-			return err
+		var record Record
+		if err = rows.Scan(&record.MsgID, &record.EnqueuedAt, &record.VisibleAt, &record.Message); err != nil {
+			return
 		}
+		records = append(records, record)
 	}
 
-	return nil
+	return
 }
 
 func (b *Broker) Consume(ctx context.Context, size int) ([]Record, error) {

@@ -56,8 +56,12 @@ func enqueueCmd() command {
 				if i > 0 {
 					time.Sleep(opt.BatchInterval)
 				}
-				if err := broker.Produce(ctx, chunk); err != nil {
+				records, err := broker.Produce(ctx, chunk)
+				if err != nil {
 					return err
+				}
+				for _, record := range records {
+					json.NewEncoder(os.Stdout).Encode(record)
 				}
 			}
 			return nil
