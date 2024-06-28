@@ -45,7 +45,7 @@ func enqueueCmd() command {
 			}
 
 			ctx := context.Background()
-			broker := NewBroker(conn, opt.RecordDelay)
+			broker := NewBroker(conn)
 
 			lines, err := readLineAsJson()
 			if err != nil {
@@ -56,7 +56,7 @@ func enqueueCmd() command {
 				if i > 0 {
 					time.Sleep(opt.BatchInterval)
 				}
-				records, err := broker.Produce(ctx, chunk)
+				records, err := broker.Produce(ctx, chunk, opt.RecordDelay)
 				if err != nil {
 					return err
 				}
@@ -102,9 +102,8 @@ func dequeueCmd() command {
 			}
 
 			ctx := context.Background()
-			broker := NewBroker(conn, time.Duration(0))
+			broker := NewBroker(conn)
 			broker.SetCursor(opt.LastVT)
-
 			for {
 				records, err := broker.Consume(ctx, opt.BatchSize)
 				if err != nil {

@@ -18,16 +18,13 @@ type Record struct {
 }
 
 type Broker struct {
-	delay time.Duration
-
 	db     *sql.DB
 	cursor time.Time
 }
 
-func NewBroker(db *sql.DB, delay time.Duration) *Broker {
+func NewBroker(db *sql.DB) *Broker {
 	return &Broker{
-		delay: delay,
-		db:    db,
+		db: db,
 	}
 }
 
@@ -39,7 +36,7 @@ func (b *Broker) GetCursor() time.Time {
 	return b.cursor
 }
 
-func (b *Broker) Produce(ctx context.Context, messages []json.RawMessage) (records []Record, err error) {
+func (b *Broker) Produce(ctx context.Context, messages []json.RawMessage, delay time.Duration) (records []Record, err error) {
 	tx, err := b.db.BeginTx(ctx, nil)
 	if err != nil {
 		return
@@ -57,7 +54,7 @@ func (b *Broker) Produce(ctx context.Context, messages []json.RawMessage) (recor
 		msgs[i] = string(msg)
 	}
 
-	query := fmt.Sprintf("INSERT INTO queue (vt, message) SELECT clock_timestamp() + interval '%d seconds', unnest($1::jsonb[]) RETURNING *", int(b.delay.Seconds()))
+	query := fmt.Sprintf("INSERT INTO queue (vt, message) SELECT clock_timestamp() + interval '%d milliseconds', unnest($1::jsonb[]) RETURNING *", delay.Milliseconds())
 	rows, err := tx.QueryContext(ctx, query, pq.Array(msgs))
 	if err != nil {
 		return
