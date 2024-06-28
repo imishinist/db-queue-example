@@ -17,7 +17,7 @@ func readLineAsJson() ([]json.RawMessage, error) {
 	scanner := bufio.NewScanner(os.Stdin)
 	var lines []json.RawMessage
 	for scanner.Scan() {
-		line := scanner.Bytes()
+		line := scanner.Text()
 		if len(line) == 0 {
 			continue
 		}

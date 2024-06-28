@@ -77,7 +77,7 @@ func (b *Broker) Produce(ctx context.Context, messages []json.RawMessage) (recor
 }
 
 func (b *Broker) Consume(ctx context.Context, size int) ([]Record, error) {
-	query := fmt.Sprintf("SELECT msg_id, enqueued_at, vt, message FROM queue WHERE $1 < vt AND vt <= clock_timestamp() ORDER BY vt LIMIT %d", size)
+	query := fmt.Sprintf("SELECT msg_id, enqueued_at, vt, message FROM queue WHERE $1 < vt AND vt <= clock_timestamp() ORDER BY vt, msg_id LIMIT %d", size)
 	rows, err := b.db.QueryContext(ctx, query, b.cursor)
 	if err != nil {
 		return nil, err
