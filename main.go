@@ -198,11 +198,71 @@ func enqueueSQSCmd() command {
 	}
 }
 
+type dequeueSQSOpt struct {
+	EndpointURL string
+	QueueName   string
+
+	PollInterval time.Duration
+}
+
+func dequeueSQSCmd() command {
+	fs := flag.NewFlagSet("dequeue-sqs", flag.ExitOnError)
+	opt := &dequeueSQSOpt{
+		EndpointURL:  "http://localhost:9324",
+		QueueName:    "default",
+		PollInterval: 1 * time.Second,
+	}
+	fs.StringVar(&opt.EndpointURL, "endpoint-url", opt.EndpointURL, "endpoint url")
+	fs.StringVar(&opt.QueueName, "queue-name", opt.QueueName, "queue name")
+	fs.DurationVar(&opt.PollInterval, "poll-interval", opt.PollInterval, "poll interval")
+
+	return command{
+		fs: fs,
+		fn: func(args []string) error {
+			if err := fs.Parse(args); err != nil {
+				return nil
+			}
+			svc, err := SQSConnect(opt.EndpointURL)
+			if err != nil {
+				return err
+			}
+			queueURL, err := CreateQueue(svc, opt.QueueName)
+			if err != nil {
+				return err
+			}
+			for {
+				res, err := svc.ReceiveMessage(context.TODO(), &sqs.ReceiveMessageInput{
+					QueueUrl: aws.String(queueURL),
+				})
+				if err != nil {
+					return err
+				}
+				if len(res.Messages) > 0 {
+					json.NewEncoder(os.Stdout).Encode(res.ResultMetadata)
+					for _, msg := range res.Messages {
+						json.NewEncoder(os.Stdout).Encode(msg)
+						_, err := svc.DeleteMessage(context.TODO(), &sqs.DeleteMessageInput{
+							QueueUrl:      aws.String(queueURL),
+							ReceiptHandle: msg.ReceiptHandle,
+						})
+						if err != nil {
+							return err
+						}
+					}
+				} else {
+					time.Sleep(opt.PollInterval)
+				}
+			}
+		},
+	}
+}
+
 func main() {
 	commands := map[string]command{
 		"enqueue":     enqueueCmd(),
 		"dequeue":     dequeueCmd(),
 		"enqueue-sqs": enqueueSQSCmd(),
+		"dequeue-sqs": dequeueSQSCmd(),
 	}
 
 	fs := flag.NewFlagSet("db-queue", flag.ExitOnError)
