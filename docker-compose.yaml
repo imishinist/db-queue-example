@@ -54,6 +54,10 @@ services:
         condition: service_healthy
   queue:
     image: softwaremill/elasticmq-native:latest
+    volumes:
+      - type: bind
+        source: ./elasticmq.conf
+        target: /opt/elasticmq.conf
     ports:
       - 9324:9324
       - 9325:9325
