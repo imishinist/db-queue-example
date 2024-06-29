@@ -260,28 +260,28 @@ func dequeueSQSCmd() command {
 				if err != nil {
 					return err
 				}
-				if len(res.Messages) > 0 {
-					deletes := make([]types.DeleteMessageBatchRequestEntry, 0, len(res.Messages))
-					for id, msg := range res.Messages {
-						json.NewEncoder(os.Stdout).Encode(msg)
 
-						deletes = append(deletes, types.DeleteMessageBatchRequestEntry{
-							Id:            aws.String(strconv.Itoa(id)),
-							ReceiptHandle: msg.ReceiptHandle,
-						})
-					}
-					res, err := svc.DeleteMessageBatch(ctx, &sqs.DeleteMessageBatchInput{
-						QueueUrl: aws.String(queueURL),
-						Entries:  deletes,
-					})
-					if err != nil {
-						return err
-					}
-					if res.Failed != nil {
-						json.NewEncoder(os.Stdout).Encode(res.Failed)
-					}
-				} else {
+				if len(res.Messages) == 0 {
 					time.Sleep(opt.PollInterval)
+				}
+				deletes := make([]types.DeleteMessageBatchRequestEntry, 0, len(res.Messages))
+				for id, msg := range res.Messages {
+					json.NewEncoder(os.Stdout).Encode(msg)
+
+					deletes = append(deletes, types.DeleteMessageBatchRequestEntry{
+						Id:            aws.String(strconv.Itoa(id)),
+						ReceiptHandle: msg.ReceiptHandle,
+					})
+				}
+				delRes, err := svc.DeleteMessageBatch(context.TODO(), &sqs.DeleteMessageBatchInput{
+					QueueUrl: aws.String(queueURL),
+					Entries:  deletes,
+				})
+				if err != nil {
+					return err
+				}
+				if delRes.Failed != nil {
+					json.NewEncoder(os.Stdout).Encode(delRes.Failed)
 				}
 			}
 		},
