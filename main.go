@@ -243,22 +243,32 @@ func dequeueSQSCmd() command {
 			}
 			for {
 				res, err := svc.ReceiveMessage(context.TODO(), &sqs.ReceiveMessageInput{
-					QueueUrl: aws.String(queueURL),
+					QueueUrl:            aws.String(queueURL),
+					MaxNumberOfMessages: 10,
+					WaitTimeSeconds:     20,
 				})
 				if err != nil {
 					return err
 				}
 				if len(res.Messages) > 0 {
-					json.NewEncoder(os.Stdout).Encode(res.ResultMetadata)
-					for _, msg := range res.Messages {
+					deletes := make([]types.DeleteMessageBatchRequestEntry, 0, len(res.Messages))
+					for id, msg := range res.Messages {
 						json.NewEncoder(os.Stdout).Encode(msg)
-						_, err := svc.DeleteMessage(context.TODO(), &sqs.DeleteMessageInput{
-							QueueUrl:      aws.String(queueURL),
+
+						deletes = append(deletes, types.DeleteMessageBatchRequestEntry{
+							Id:            aws.String(strconv.Itoa(id)),
 							ReceiptHandle: msg.ReceiptHandle,
 						})
-						if err != nil {
-							return err
-						}
+					}
+					res, err := svc.DeleteMessageBatch(context.TODO(), &sqs.DeleteMessageBatchInput{
+						QueueUrl: aws.String(queueURL),
+						Entries:  deletes,
+					})
+					if err != nil {
+						return err
+					}
+					if res.Failed != nil {
+						json.NewEncoder(os.Stdout).Encode(res.Failed)
 					}
 				} else {
 					time.Sleep(opt.PollInterval)
