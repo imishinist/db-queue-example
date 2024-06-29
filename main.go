@@ -9,6 +9,10 @@ import (
 	"os"
 	"sort"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/aws/aws-sdk-go/aws"
 )
 
 type enqueueOpt struct {
@@ -122,10 +126,83 @@ func dequeueCmd() command {
 	}
 }
 
+type enqueueSQSOpt struct {
+	EndpointURL string
+	QueueName   string
+}
+
+func SQSConnect(endpointURL string) (*sqs.Client, error) {
+	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion("ap-northeast-1"))
+	if err != nil {
+		return nil, err
+	}
+
+	svc := sqs.NewFromConfig(cfg, func(o *sqs.Options) {
+		o.BaseEndpoint = aws.String(endpointURL)
+	})
+	return svc, nil
+}
+
+func CreateQueue(svc *sqs.Client, queueName string) (string, error) {
+	res, err := svc.CreateQueue(context.TODO(), &sqs.CreateQueueInput{
+		QueueName: aws.String(queueName),
+	})
+	if err != nil {
+		return "", err
+	}
+	return *res.QueueUrl, nil
+}
+
+func enqueueSQSCmd() command {
+	fs := flag.NewFlagSet("enqueue-sqs", flag.ExitOnError)
+	opt := &enqueueSQSOpt{
+		EndpointURL: "http://localhost:9324",
+		QueueName:   "default",
+	}
+	fs.StringVar(&opt.EndpointURL, "endpoint-url", opt.EndpointURL, "endpoint url")
+	fs.StringVar(&opt.QueueName, "queue-name", opt.QueueName, "queue name")
+
+	return command{
+		fs: fs,
+		fn: func(args []string) error {
+			if err := fs.Parse(args); err != nil {
+				return nil
+			}
+
+			svc, err := SQSConnect(opt.EndpointURL)
+			if err != nil {
+				return err
+			}
+			queueURL, err := CreateQueue(svc, opt.QueueName)
+			if err != nil {
+				return err
+			}
+
+			lines, err := readLineAsJson()
+			if err != nil {
+				return err
+			}
+			for _, line := range lines {
+				res, err := svc.SendMessage(context.TODO(), &sqs.SendMessageInput{
+					QueueUrl:    aws.String(queueURL),
+					MessageBody: aws.String(string(line)),
+				})
+				if err != nil {
+					return err
+				}
+				json.NewEncoder(os.Stdout).Encode(res)
+			}
+
+			return nil
+		},
+	}
+}
+
 func main() {
 	commands := map[string]command{
-		"enqueue": enqueueCmd(),
-		"dequeue": dequeueCmd(),
+		"enqueue":     enqueueCmd(),
+		"dequeue":     dequeueCmd(),
+		"enqueue-sqs": enqueueSQSCmd(),
 	}
 
 	fs := flag.NewFlagSet("db-queue", flag.ExitOnError)
