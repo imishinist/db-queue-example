@@ -135,8 +135,8 @@ type enqueueSQSOpt struct {
 	BatchInterval time.Duration
 }
 
-func SQSConnect(endpointURL string) (*sqs.Client, error) {
-	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion("ap-northeast-1"))
+func SQSConnect(ctx context.Context, endpointURL string) (*sqs.Client, error) {
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion("ap-northeast-1"))
 	if err != nil {
 		return nil, err
 	}
@@ -147,8 +147,8 @@ func SQSConnect(endpointURL string) (*sqs.Client, error) {
 	return svc, nil
 }
 
-func CreateQueue(svc *sqs.Client, queueName string) (string, error) {
-	res, err := svc.CreateQueue(context.TODO(), &sqs.CreateQueueInput{
+func CreateQueue(ctx context.Context, svc *sqs.Client, queueName string) (string, error) {
+	res, err := svc.CreateQueue(ctx, &sqs.CreateQueueInput{
 		QueueName: aws.String(queueName),
 	})
 	if err != nil {
@@ -175,11 +175,13 @@ func enqueueSQSCmd() command {
 				return nil
 			}
 
-			svc, err := SQSConnect(opt.EndpointURL)
+			ctx := context.Background()
+
+			svc, err := SQSConnect(ctx, opt.EndpointURL)
 			if err != nil {
 				return err
 			}
-			queueURL, err := CreateQueue(svc, opt.QueueName)
+			queueURL, err := CreateQueue(ctx, svc, opt.QueueName)
 			if err != nil {
 				return err
 			}
@@ -193,7 +195,7 @@ func enqueueSQSCmd() command {
 						MessageBody: aws.String(string(line)),
 					})
 				}
-				res, err := svc.SendMessageBatch(context.TODO(), &sqs.SendMessageBatchInput{
+				res, err := svc.SendMessageBatch(ctx, &sqs.SendMessageBatchInput{
 					QueueUrl: aws.String(queueURL),
 					Entries:  messages,
 				})
@@ -238,16 +240,19 @@ func dequeueSQSCmd() command {
 			if err := fs.Parse(args); err != nil {
 				return nil
 			}
-			svc, err := SQSConnect(opt.EndpointURL)
+
+			ctx := context.Background()
+
+			svc, err := SQSConnect(ctx, opt.EndpointURL)
 			if err != nil {
 				return err
 			}
-			queueURL, err := CreateQueue(svc, opt.QueueName)
+			queueURL, err := CreateQueue(ctx, svc, opt.QueueName)
 			if err != nil {
 				return err
 			}
 			for {
-				res, err := svc.ReceiveMessage(context.TODO(), &sqs.ReceiveMessageInput{
+				res, err := svc.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
 					QueueUrl:            aws.String(queueURL),
 					MaxNumberOfMessages: 10,
 					WaitTimeSeconds:     20,
@@ -265,7 +270,7 @@ func dequeueSQSCmd() command {
 							ReceiptHandle: msg.ReceiptHandle,
 						})
 					}
-					res, err := svc.DeleteMessageBatch(context.TODO(), &sqs.DeleteMessageBatchInput{
+					res, err := svc.DeleteMessageBatch(ctx, &sqs.DeleteMessageBatchInput{
 						QueueUrl: aws.String(queueURL),
 						Entries:  deletes,
 					})
