@@ -8,10 +8,12 @@ import (
 	"log"
 	"os"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/aws/aws-sdk-go/aws"
 )
 
@@ -178,19 +180,28 @@ func enqueueSQSCmd() command {
 				return err
 			}
 
-			lines, err := readLineAsJson()
-			if err != nil {
-				return err
-			}
-			for _, line := range lines {
-				res, err := svc.SendMessage(context.TODO(), &sqs.SendMessageInput{
-					QueueUrl:    aws.String(queueURL),
-					MessageBody: aws.String(string(line)),
+			lineCh := readLineAsJsonCh()
+			for chunk := range chunkChBy(lineCh, 10) {
+				messages := make([]types.SendMessageBatchRequestEntry, 0)
+				for i, line := range chunk {
+					messages = append(messages, types.SendMessageBatchRequestEntry{
+						Id:          aws.String(strconv.Itoa(i)),
+						MessageBody: aws.String(string(line)),
+					})
+				}
+				res, err := svc.SendMessageBatch(context.TODO(), &sqs.SendMessageBatchInput{
+					QueueUrl: aws.String(queueURL),
+					Entries:  messages,
 				})
 				if err != nil {
 					return err
 				}
-				json.NewEncoder(os.Stdout).Encode(res)
+				if res.Failed != nil {
+					json.NewEncoder(os.Stdout).Encode(res.Failed)
+				}
+				if res.Successful != nil {
+					json.NewEncoder(os.Stdout).Encode(res.Successful)
+				}
 			}
 
 			return nil
