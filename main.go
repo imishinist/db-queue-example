@@ -131,6 +131,8 @@ func dequeueCmd() command {
 type enqueueSQSOpt struct {
 	EndpointURL string
 	QueueName   string
+
+	BatchInterval time.Duration
 }
 
 func SQSConnect(endpointURL string) (*sqs.Client, error) {
@@ -158,11 +160,13 @@ func CreateQueue(svc *sqs.Client, queueName string) (string, error) {
 func enqueueSQSCmd() command {
 	fs := flag.NewFlagSet("enqueue-sqs", flag.ExitOnError)
 	opt := &enqueueSQSOpt{
-		EndpointURL: "http://localhost:9324",
-		QueueName:   "default",
+		EndpointURL:   "http://localhost:9324",
+		QueueName:     "default",
+		BatchInterval: 10 * time.Millisecond,
 	}
 	fs.StringVar(&opt.EndpointURL, "endpoint-url", opt.EndpointURL, "endpoint url")
 	fs.StringVar(&opt.QueueName, "queue-name", opt.QueueName, "queue name")
+	fs.DurationVar(&opt.BatchInterval, "batch-interval", opt.BatchInterval, "batch interval")
 
 	return command{
 		fs: fs,
@@ -202,6 +206,7 @@ func enqueueSQSCmd() command {
 				if res.Successful != nil {
 					json.NewEncoder(os.Stdout).Encode(res.Successful)
 				}
+				time.Sleep(opt.BatchInterval)
 			}
 
 			return nil
