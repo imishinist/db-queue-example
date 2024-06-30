@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+
+	"github.com/google/uuid"
 )
 
 type Executor struct {
@@ -18,23 +20,20 @@ func NewExecutor(id string) *Executor {
 }
 
 func (e *Executor) Run(ctx context.Context, ids []string) error {
-	tmpfile, err := os.OpenFile(fmt.Sprintf("/tmp/user_list_%s", e.ID), os.O_CREATE|os.O_RDWR, 0666)
+	tmpfile, err := os.OpenFile(fmt.Sprintf("/tmp/%s", uuid.New().String()), os.O_CREATE|os.O_RDWR, 0666)
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmpfile.Name())
 	for _, id := range ids {
 		tmpfile.WriteString(id + "\n")
 	}
 	tmpfile.Close()
 
-	commands := fmt.Sprintf("bin/process.sh %s %s", e.ID, tmpfile.Name())
+	commands := fmt.Sprintf("bin/process.sh %s %s >>/tmp/%s.stdout 2>>/tmp/%s.stderr", e.ID, tmpfile.Name(), e.ID, e.ID)
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", commands)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
+	if err := cmd.Start(); err != nil {
 		return err
 	}
+
 	return nil
 }
