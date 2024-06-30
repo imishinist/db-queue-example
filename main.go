@@ -9,6 +9,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -288,12 +289,112 @@ func dequeueSQSCmd() command {
 	}
 }
 
+type supervisorOpt struct {
+	Workers int
+
+	EndpointURL string
+	QueueName   string
+}
+
+func receiveCh(ctx context.Context, svc *sqs.Client, queueURL string) <-chan types.Message {
+	ch := make(chan types.Message)
+	go func() {
+		defer close(ch)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				res, err := svc.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
+					QueueUrl:            aws.String(queueURL),
+					MaxNumberOfMessages: 10,
+					WaitTimeSeconds:     20,
+				})
+				if err != nil {
+					log.Println(err)
+					return
+				}
+				for _, msg := range res.Messages {
+					ch <- msg
+				}
+			}
+		}
+	}()
+	return ch
+}
+
+type QueueMessage struct {
+	UserID int `json:"user_id"`
+}
+
+func supervisorCmd() command {
+	fs := flag.NewFlagSet("supervisor", flag.ExitOnError)
+	opt := &supervisorOpt{
+		Workers:     4,
+		EndpointURL: "http://localhost:9324",
+		QueueName:   "default",
+	}
+	fs.IntVar(&opt.Workers, "workers", opt.Workers, "workers")
+	fs.StringVar(&opt.EndpointURL, "endpoint-url", opt.EndpointURL, "endpoint url")
+	fs.StringVar(&opt.QueueName, "queue-name", opt.QueueName, "queue name")
+
+	return command{
+		fs: fs,
+		fn: func(args []string) error {
+			if err := fs.Parse(args); err != nil {
+				return err
+			}
+
+			ctx := context.Background()
+			svc, err := SQSConnect(ctx, opt.EndpointURL)
+			if err != nil {
+				return err
+			}
+			queueURL, err := CreateQueue(ctx, svc, opt.QueueName)
+			if err != nil {
+				return err
+			}
+			queue := receiveCh(ctx, svc, queueURL)
+
+			wg := new(sync.WaitGroup)
+			wg.Add(opt.Workers)
+			for i := 0; i < opt.Workers; i++ {
+				i := i
+				go func() {
+					defer wg.Done()
+					executor := NewExecutor(strconv.Itoa(i), time.Second)
+
+					for msg := range queue {
+						var qm QueueMessage
+
+						if msg.Body == nil {
+							continue
+						}
+						if err := json.Unmarshal([]byte(*msg.Body), &qm); err != nil {
+							log.Println(err)
+							continue
+						}
+
+						if err := executor.Run(ctx, []string{strconv.Itoa(qm.UserID)}); err != nil {
+							log.Println(err)
+							return
+						}
+					}
+				}()
+			}
+			wg.Wait()
+			return nil
+		},
+	}
+}
+
 func main() {
 	commands := map[string]command{
 		"enqueue":     enqueueCmd(),
 		"dequeue":     dequeueCmd(),
 		"enqueue-sqs": enqueueSQSCmd(),
 		"dequeue-sqs": dequeueSQSCmd(),
+		"supervisor":  supervisorCmd(),
 	}
 
 	fs := flag.NewFlagSet("db-queue", flag.ExitOnError)
