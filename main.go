@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -188,7 +189,7 @@ func enqueueSQSCmd() command {
 			}
 
 			lineCh := readLineAsJsonCh()
-			for chunk := range chunkChBy(lineCh, 10) {
+			for chunk := range chunkChBy(lineCh, 10, 3*time.Second) {
 				messages := make([]types.SendMessageBatchRequestEntry, 0)
 				for i, line := range chunk {
 					messages = append(messages, types.SendMessageBatchRequestEntry{
@@ -354,7 +355,7 @@ func supervisorCmd() command {
 			if err != nil {
 				return err
 			}
-			queue := receiveCh(ctx, svc, queueURL)
+			queue := chunkChBy(receiveCh(ctx, svc, queueURL), 10, 5*time.Second)
 
 			wg := new(sync.WaitGroup)
 			wg.Add(opt.Workers)
@@ -362,20 +363,27 @@ func supervisorCmd() command {
 				i := i
 				go func() {
 					defer wg.Done()
-					executor := NewExecutor(strconv.Itoa(i), time.Second)
+					executor := NewExecutor(strconv.Itoa(i))
 
-					for msg := range queue {
-						var qm QueueMessage
+					for messages := range queue {
+						ids := make([]string, 0, len(messages))
+						for _, msg := range messages {
+							var qm QueueMessage
+							if msg.Body == nil {
+								continue
+							}
+							if err := json.Unmarshal([]byte(*msg.Body), &qm); err != nil {
+								log.Println(err)
+								continue
+							}
+							buf := new(bytes.Buffer)
+							json.NewEncoder(buf).Encode(qm)
+							log.Printf("[supervisor: %d]: %s", i, buf.String())
 
-						if msg.Body == nil {
-							continue
+							ids = append(ids, strconv.Itoa(qm.UserID))
 						}
-						if err := json.Unmarshal([]byte(*msg.Body), &qm); err != nil {
-							log.Println(err)
-							continue
-						}
 
-						if err := executor.Run(ctx, []string{strconv.Itoa(qm.UserID)}); err != nil {
+						if err := executor.Run(ctx, ids); err != nil {
 							log.Println(err)
 							return
 						}

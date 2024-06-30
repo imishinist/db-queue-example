@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"os"
+	"time"
 )
 
 func chunkBy[T any](items []T, chunkSize int) (chunks [][]T) {
@@ -13,22 +14,41 @@ func chunkBy[T any](items []T, chunkSize int) (chunks [][]T) {
 	return append(chunks, items)
 }
 
-func chunkChBy[T any](input <-chan T, chunkSize int) <-chan []T {
+func chunkChBy[T any](input <-chan T, chunkSize int, waitTimeout time.Duration) <-chan []T {
 	output := make(chan []T)
 
+	timer := time.NewTimer(waitTimeout)
 	go func() {
 		defer close(output)
-		ret := make([]T, 0, chunkSize)
+		defer timer.Stop()
 
-		for item := range input {
-			ret = append(ret, item)
-			if len(ret) >= chunkSize {
+		ret := make([]T, 0, chunkSize)
+		for {
+			select {
+			case item, ok := <-input:
+				if !ok {
+					// closed
+					if len(ret) > 0 {
+						output <- ret
+					}
+					return
+				}
+				ret = append(ret, item)
+
+				if len(ret) == chunkSize {
+					output <- ret
+					ret = make([]T, 0, chunkSize)
+					timer.Reset(waitTimeout)
+				}
+			case <-timer.C:
+				if len(ret) == 0 {
+					timer.Reset(waitTimeout)
+					continue
+				}
 				output <- ret
 				ret = make([]T, 0, chunkSize)
+				timer.Reset(waitTimeout)
 			}
-		}
-		if len(ret) > 0 {
-			output <- ret
 		}
 	}()
 	return output

@@ -1,10 +1,11 @@
 #!/bin/bash
 
-user_id_file=$1
+k=$1
+user_id_file=$2
 
-echo "Reading user IDs from file: $user_id_file"
+echo "[k=$k]: Reading user IDs from file: $user_id_file"
 for user_id in $(cat $user_id_file); do
-  echo "User ID: $user_id"
-  sleep 1
+  echo "[k=$k]: User ID: $user_id"
+  #sleep 1
 done
 

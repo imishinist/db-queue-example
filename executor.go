@@ -5,18 +5,15 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"time"
 )
 
 type Executor struct {
-	ID       string
-	Interval time.Duration
+	ID string
 }
 
-func NewExecutor(id string, interval time.Duration) *Executor {
+func NewExecutor(id string) *Executor {
 	return &Executor{
-		ID:       id,
-		Interval: interval,
+		ID: id,
 	}
 }
 
@@ -31,8 +28,8 @@ func (e *Executor) Run(ctx context.Context, ids []string) error {
 	}
 	tmpfile.Close()
 
-	commands := fmt.Sprintf("bin/process.sh %s", tmpfile.Name())
-	cmd := exec.Command("/bin/sh", "-c", commands)
+	commands := fmt.Sprintf("bin/process.sh %s %s", e.ID, tmpfile.Name())
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", commands)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
